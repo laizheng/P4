@@ -36,10 +36,15 @@ class Filter():
         self.mtx = dist_pickle["mtx"]
         self.dist = dist_pickle["dist"]
 
-        slb = (315,737)
-        slt = (575,492)
-        srb = (1230,737)
-        srt = (764,492)
+        #slb = (315,737)
+        #slt = (575,492)
+        #srb = (1230,737)
+        #srt = (764,492)
+
+        slb = (265,737)
+        slt = (605,460)
+        srb = (1172,737)
+        srt = (683,460)
 
         #slb = (315, 737)
         #slt = (616, 456)
@@ -161,6 +166,23 @@ class Filter():
     def warp(self,img,dbgcode=0):
         M = cv2.getPerspectiveTransform(self.src,self.dst)
         warped = cv2.warpPerspective(img,M,(img.shape[1],img.shape[0]), flags = cv2.INTER_LINEAR)
+        if dbgcode==1:
+            f, (ax0,ax1) = plt.subplots(2,1,figsize=(12,9))
+            f.tight_layout()
+            ax0.imshow(img)
+            ax0.set_title("Before Warp")
+            ax0.plot(self.src[0][0],self.src[0][1], '.', markersize=12)
+            ax0.plot(self.src[1][0], self.src[1][1], '.', markersize=12)
+            ax0.plot(self.src[2][0], self.src[2][1], '.', markersize=12)
+            ax0.plot(self.src[3][0], self.src[3][1], '.', markersize=12)
+            lleft = plt.Line2D((self.src[0,0],self.src[1,0]) ,(self.src[0,1],self.src[1,1]))
+            ax0.add_line(lleft)
+            lright = plt.Line2D((self.src[2,0],self.src[3,0]) ,(self.src[2,1],self.src[3,1]))
+            ax0.add_line(lright)
+            ax1.imshow(warped)
+            ax1.set_title("After Warp")
+            plt.subplots_adjust(left=0,right=1,top=0.9,bottom=0)
+            plt.show()
         return warped
 
     def unwarp(self,img):
@@ -254,20 +276,30 @@ class Filter():
 
     def sliding_find_cor(self,img,xstart,y,sum_th,coordinates):
         sums = []
+        x_non_zero_start_flag = 0
+        x_non_zero_start_point = 0
         for x in range(int(xstart - 1.5*self.box_width),int(xstart+1.5*self.box_width),self.box_step_horizontal):
-            if ((x+self.box_width) >= img.shape[1]) or (x <0):
+            if x<0:
                 continue
+            elif ((x+self.box_width) >= img.shape[1]):
+                break
             else:
+                if x_non_zero_start_flag==0:
+                    x_non_zero_start_point = x
+                    x_non_zero_start_flag = 1
                 sums.append(np.sum(img[(y-self.box_height):y, x:x+self.box_width]))
         max_sum = np.max(sums)
         y_res = y - 0.5 * self.box_height
         if max_sum > sum_th:
-            x_res = np.argmax(sums) + int(xstart-1.5 * self.box_width) + self.box_width*0.5
+            x_res = np.argmax(sums) + x_non_zero_start_point + self.box_width*0.5
         else:
             if (len(coordinates) ==0) :
                 x_res = xstart
             else:
                 x_res = coordinates[-1][1]
+        if x_res<0:
+            x_res=x_res
+            pass
         coordinates.append((y_res,x_res))
 
     def sliding(self,img,sum_th):
@@ -368,7 +400,7 @@ class Filter():
         car_center_pix = int(warped_shape[1]/2)
         lane_center_pix = abs(fitx_left[-1] - fitx_right[-1])
         offset_pix = car_center_pix - lane_center_pix
-        offset_meter = offset_pix * xm_per_pix
+        offset_meter = (offset_pix + 268) * xm_per_pix
         return offset_meter
 
     def pipline(self,img):
@@ -392,12 +424,13 @@ class Filter():
         self.right_curverads.append(right_curvrad)
         self.resetDiag()
         self.mainDiagScreen = projection
-        self.diag1 = warped
-        self.diag2 = color_binary
-        self.diag3 = combined_thresholing
-        self.diag4 = sliding_result
-        self.diag5 = filtered_by_box_image_left
-        self.diag6 = filtered_by_box_image_right
+        self.diag1 = self.warp(undist)
+        self.diag2 = warped
+        self.diag3 = color_binary
+        self.diag4 = combined_thresholing
+        self.diag5 = sliding_result
+        self.diag6 = filtered_by_box_image_left
+        self.diag7 = filtered_by_box_image_right
         self.frameNum = self.frameNum + 1
         self.diagScreenUpdate()
         return self.diagScreen

@@ -10,6 +10,7 @@ from moviepy.editor import VideoFileClip
 
 def main():
     filter = Filter(image_paths = "./project_video_images/*.jpg")
+    #filter = Filter(image_paths="./test_images/*.jpg")
     for path in filter.image_paths:
         print("processing...{}".format(path))
         img = filter.imread(path)
