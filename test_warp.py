@@ -9,7 +9,8 @@ from filters import Filter
 from moviepy.editor import VideoFileClip
 
 def main():
-    filter = Filter(image_paths="./warp_test_images/*.jpg")
+    #filter = Filter(image_paths="./warp_test_images/*.jpg")
+    filter = Filter(image_paths="./project_video_images_debug/*.jpg")
     img = filter.imread(filter.image_paths[0])
     undist = filter.undistort(img)
     undist = cv2.resize(undist, (1280, 738))

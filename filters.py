@@ -36,20 +36,15 @@ class Filter():
         self.mtx = dist_pickle["mtx"]
         self.dist = dist_pickle["dist"]
 
-        #slb = (315,737)
-        #slt = (575,492)
-        #srb = (1230,737)
-        #srt = (764,492)
+        #slb = (265,737)
+        #slt = (605,460)
+        #srb = (1172,737)
+        #srt = (683,460)
 
-        slb = (265,737)
-        slt = (605,460)
-        srb = (1172,737)
-        srt = (683,460)
-
-        #slb = (315, 737)
-        #slt = (616, 456)
-        #srb = (1230, 737)
-        #srt = (698, 456)
+        slb = (0, 737)
+        slt = (583, 460)
+        srb = (1279, 737)
+        srt = (695, 460)
 
         self.src = np.float32([slb,slt,srb,srt])
 
