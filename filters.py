@@ -237,9 +237,11 @@ class Filter():
     def color_mask(self, img):
         hls = cv2.cvtColor(img, cv2.COLOR_RGB2HLS)
         H = hls[:, :, 0]
+        L = hls[:, :, 1]
         S = hls[:, :, 2]
+        S = (S / np.max(S) * 255).astype(np.uint8)
         hls_binary = np.zeros_like(H)
-        hls_binary[(S >= 30) & (H <= 100)] = 1
+        hls_binary[((H <= 24) & (H >= 18)) & (S >= 100)] = 1
 
         gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
         gray_binary = np.zeros_like(gray)
