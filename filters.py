@@ -239,7 +239,7 @@ class Filter():
         H = hls[:, :, 0]
         S = hls[:, :, 2]
         hls_binary = np.zeros_like(H)
-        hls_binary[(S >= 80) & (H <= 80)] = 1
+        hls_binary[(S >= 30) & (H <= 100)] = 1
 
         gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
         gray_binary = np.zeros_like(gray)
@@ -275,7 +275,7 @@ class Filter():
         sums = []
         x_non_zero_start_flag = 0
         x_non_zero_start_point = 0
-        for x in range(int(xstart - 1.5 * self.box_width), int(xstart + 1.5 * self.box_width),
+        for x in range(int(xstart - 3 * self.box_width), int(xstart + 3 * self.box_width),
                        self.box_step_horizontal):
             if x < 0:
                 continue
@@ -288,7 +288,7 @@ class Filter():
                 sums.append(np.sum(img[(y - self.box_height):y, x:x + self.box_width]))
         max_sum = np.max(sums)
         y_res = y - 0.5 * self.box_height
-        if max_sum > sum_th:
+        if (max_sum > sum_th):
             x_res = np.argmax(sums) + x_non_zero_start_point + self.box_width * 0.5
         else:
             if (len(coordinates) == 0):
@@ -379,7 +379,7 @@ class Filter():
         cv2.fillPoly(color_warp, np.int_([pts]), (0, 255, 0))
         newwarp = self.unwarp(color_warp)
         result = cv2.addWeighted(undist, 1, newwarp, 0.3, 0)
-        return result
+        return result,color_warp
 
     def curvrad(self, y_left, fitx_left, y_right, fitx_right):
         ym_per_pix = 3 / self.dashed_line_length_in_pixel
@@ -407,14 +407,14 @@ class Filter():
         undist = cv2.resize(undist, (1280, 738))
         combined_thresholing, color_binary = self.thresholding(undist)
         warped = self.warp(color_binary)
-        coorindates_left, coordinates_right = self.sliding(warped, 100)
+        coorindates_left, coordinates_right = self.sliding(warped, 0.25*self.box_height*self.box_width)
         sliding_result = self.draw_sliding_result(warped, coorindates_left, coordinates_right)
         box_image_left, box_image_right = self.box_image_gen(warped.shape, coorindates_left, coordinates_right)
         filtered_by_box_image_left = np.multiply(warped, box_image_left)
         filtered_by_box_image_right = np.multiply(warped, box_image_right)
         y_left, fitx_left = self.poly_fit(filtered_by_box_image_left)
         y_right, fitx_right = self.poly_fit(filtered_by_box_image_right)
-        projection = self.project(warped, y_left, fitx_left, y_right, fitx_right, undist)
+        projection, warped_polyfill = self.project(warped, y_left, fitx_left, y_right, fitx_right, undist)
         left_curvrad, right_curvrad = self.curvrad(y_left, fitx_left, y_right, fitx_right)
         offset_meter = self.estimate_center_offset(y_left, fitx_left, y_right, fitx_right, warped.shape)
         self.offsets_meter.append(offset_meter)
@@ -429,6 +429,7 @@ class Filter():
         self.diag5 = sliding_result
         self.diag6 = filtered_by_box_image_left
         self.diag7 = filtered_by_box_image_right
+        self.diag8 = warped_polyfill
         self.frameNum = self.frameNum + 1
         self.diagScreenUpdate()
         return self.diagScreen
