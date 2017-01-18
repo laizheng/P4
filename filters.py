@@ -42,10 +42,10 @@ class Filter():
         # srb = (1172,737)
         # srt = (683,460)
 
-        slb = (0, 737)
+        slb = (100, 737)
         slt = (583, 460)
-        srb = (1279, 737)
-        srt = (695, 460)
+        srb = (1249, 737)
+        srt = (700, 460)
 
         self.src = np.float32([slb, slt, srb, srt])
 
@@ -64,7 +64,7 @@ class Filter():
         self.box_step_vertical = 25
 
         # Cur Rad
-        self.dashed_line_length_in_pixel = 180
+        self.dashed_line_length_in_pixel = 62
         self.lane_width_in_pixel = 900
         self.left_curverads = []
         self.right_curverads = []
@@ -293,10 +293,11 @@ class Filter():
         if (max_sum > sum_th):
             x_res = np.argmax(sums) + x_non_zero_start_point + self.box_width * 0.5
         else:
-            if (len(coordinates) == 0):
-                x_res = xstart
-            else:
-                x_res = coordinates[-1][1]
+            return
+            #if (len(coordinates) == 0):
+            #    x_res = xstart
+            #else:
+            #    x_res = coordinates[-1][1]
         if x_res < 0:
             x_res = x_res
             pass
@@ -318,8 +319,10 @@ class Filter():
             if (y - self.box_height) >= 0:
                 self.sliding_find_cor(img, left_start, y, sum_th, coorinates_left)
                 self.sliding_find_cor(img, right_start, y, sum_th, coorinates_right)
-                left_start = coorinates_left[-1][1]
-                right_start = coorinates_right[-1][1]
+                if len(coorinates_left)>0:
+                    left_start = coorinates_left[-1][1]
+                if len(coorinates_right) > 0:
+                    right_start = coorinates_right[-1][1]
         return coorinates_left, coorinates_right
 
     def draw_box(self, img, coordinate):
@@ -371,12 +374,32 @@ class Filter():
         y = np.linspace(0, filtered_by_box_image.shape[0], num=100)
         fitx = fit[0] * y ** 2 + fit[1] * y + fit[2]
         return y, fitx
-
+    
+    def remove_out_of_bound_pts(self,warped_shape,y_left, fitx_left, y_right, fitx_right):
+        assert len(y_left)==len(fitx_left)
+        assert len(y_right) == len(fitx_right)
+        y_left_copy=[]
+        fitx_left_copy=[]
+        y_right_copy=[] 
+        fitx_right_copy=[]
+        for i in range(len(y_left)):
+            if fitx_left[i]>=0 and fitx_left[i]<warped_shape[1]:
+                y_left_copy.append(y_left[i])
+                fitx_left_copy.append(fitx_left[i])
+        for i in range(len(y_right)):
+            if fitx_right[i]>=0 and fitx_right[i]<warped_shape[1]:
+                y_right_copy.append(y_right[i])
+                fitx_right_copy.append(fitx_right[i])
+        return y_left_copy, fitx_left_copy, y_right_copy, fitx_right_copy
+                
+    
     def project(self, warped, y_left, fitx_left, y_right, fitx_right, undist):
+        y_left_copy, fitx_left_copy, y_right_copy, fitx_right_copy = \
+            self.remove_out_of_bound_pts(warped.shape,y_left, fitx_left, y_right, fitx_right)
         warp_zero = np.zeros_like(warped).astype(np.uint8)
         color_warp = np.dstack((warp_zero, warp_zero, warp_zero))
-        pts_left = np.array([np.transpose(np.vstack([fitx_left, y_left]))])
-        pts_right = np.array([np.flipud(np.transpose(np.vstack([fitx_right, y_right])))])
+        pts_left = np.array([np.transpose(np.vstack([fitx_left_copy, y_left_copy]))])
+        pts_right = np.array([np.flipud(np.transpose(np.vstack([fitx_right_copy, y_right_copy])))])
         pts = np.hstack((pts_left, pts_right))
         cv2.fillPoly(color_warp, np.int_([pts]), (0, 255, 0))
         newwarp = self.unwarp(color_warp)
@@ -409,7 +432,7 @@ class Filter():
         undist = cv2.resize(undist, (1280, 738))
         combined_thresholing, color_binary = self.thresholding(undist)
         warped = self.warp(color_binary)
-        coorindates_left, coordinates_right = self.sliding(warped, 0.25*self.box_height*self.box_width)
+        coorindates_left, coordinates_right = self.sliding(warped, 0.15*self.box_height*self.box_width)
         sliding_result = self.draw_sliding_result(warped, coorindates_left, coordinates_right)
         box_image_left, box_image_right = self.box_image_gen(warped.shape, coorindates_left, coordinates_right)
         filtered_by_box_image_left = np.multiply(warped, box_image_left)
