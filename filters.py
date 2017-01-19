@@ -42,15 +42,22 @@ class Filter():
         # srb = (1172,737)
         # srt = (683,460)
 
-        slb = (100, 737)
-        slt = (583, 460)
-        srb = (1249, 737)
-        srt = (700, 460)
+        #slb = (0, 680)
+        #slt = (565, 460)
+
+        #srb = (1279, 680)
+        #srt = (715, 460)
+
+        slb = (0, 650)
+        slt = (555, 460)
+
+        srb = (1279, 650)
+        srt = (720, 460)
 
         self.src = np.float32([slb, slt, srb, srt])
 
-        dlb = slb
-        drb = srb
+        dlb = (slb[0],737)
+        drb = (srb[0],737)
         dlt = (slb[0], 0)
         drt = (srb[0], 0)
         self.dst = np.float32([dlb, dlt, drb, drt])
@@ -369,42 +376,74 @@ class Filter():
         try:
             fit = np.polyfit(y, x, 2)
         except TypeError:
-            cv2.imwrite("debug_orig_img.jpg", cv2.cvtColor(self.img, cv2.COLOR_RGB2BGR))
+            cv2.imwrite("debug_orig_img_poly_fit_filter_box.jpg", cv2.cvtColor(self.img, cv2.COLOR_RGB2BGR))
             quit()
-        y = np.linspace(0, filtered_by_box_image.shape[0], num=100)
+        y = np.linspace(0, filtered_by_box_image.shape[0]-1, num=100)
         fitx = fit[0] * y ** 2 + fit[1] * y + fit[2]
         return y, fitx
     
     def remove_out_of_bound_pts(self,warped_shape,y_left, fitx_left, y_right, fitx_right):
         assert len(y_left)==len(fitx_left)
         assert len(y_right) == len(fitx_right)
-        y_left_copy=[]
-        fitx_left_copy=[]
-        y_right_copy=[] 
-        fitx_right_copy=[]
+        y_left_bounded=[]
+        fitx_left_bounded=[]
+        y_right_bounded=[] 
+        fitx_right_bounded=[]
         for i in range(len(y_left)):
             if fitx_left[i]>=0 and fitx_left[i]<warped_shape[1]:
-                y_left_copy.append(y_left[i])
-                fitx_left_copy.append(fitx_left[i])
+                y_left_bounded.append(y_left[i])
+                fitx_left_bounded.append(fitx_left[i])
         for i in range(len(y_right)):
             if fitx_right[i]>=0 and fitx_right[i]<warped_shape[1]:
-                y_right_copy.append(y_right[i])
-                fitx_right_copy.append(fitx_right[i])
-        return y_left_copy, fitx_left_copy, y_right_copy, fitx_right_copy
+                y_right_bounded.append(y_right[i])
+                fitx_right_bounded.append(fitx_right[i])
+        return y_left_bounded, fitx_left_bounded, y_right_bounded, fitx_right_bounded
                 
+    def poly_fit_unwarped(self,img_shape, y_left, x_left,y_right, x_right):
+        try:
+            fit_left = np.polyfit(y_left, x_left, 2)
+            fit_right = np.polyfit(y_right, x_right, 2)
+        except TypeError:
+            cv2.imwrite("debug_orig_img_poly_fit_find_polyfit_edge.jpg", cv2.cvtColor(self.img, cv2.COLOR_RGB2BGR))
+            quit()
+        fity_left = np.linspace(np.min(y_left),img_shape[0]-25, num=100)
+        fitx_left = fit_left[0] * fity_left ** 2 + fit_left[1] * fity_left + fit_left[2]
+        fity_right = np.linspace(np.min(y_right),img_shape[0]-25, num=100)
+        fitx_right = fit_right[0] * fity_right ** 2 + fit_right[1] * fity_right + fit_right[2]
+        return fity_left,fitx_left,fity_right,fitx_right
+
+    def gen_lines_from_pts(self,img_shape,y, x):
+        ret_img = np.zeros(img_shape)
+        assert len(y) == len(x)
+        pts = list(zip(y, x))
+        for i in pts:
+            ret_img[i] = 255
+        return ret_img
     
     def project(self, warped, y_left, fitx_left, y_right, fitx_right, undist):
-        y_left_copy, fitx_left_copy, y_right_copy, fitx_right_copy = \
+        # Remove out of bound points
+        y_left_bounded, fitx_left_bounded, y_right_bounded, fitx_right_bounded = \
             self.remove_out_of_bound_pts(warped.shape,y_left, fitx_left, y_right, fitx_right)
-        warp_zero = np.zeros_like(warped).astype(np.uint8)
-        color_warp = np.dstack((warp_zero, warp_zero, warp_zero))
-        pts_left = np.array([np.transpose(np.vstack([fitx_left_copy, y_left_copy]))])
-        pts_right = np.array([np.flipud(np.transpose(np.vstack([fitx_right_copy, y_right_copy])))])
+        # Extend the lines to bottom of images
+        left_line_only_img = self.gen_lines_from_pts(warped.shape, y_left_bounded, fitx_left_bounded)
+        right_line_only_img = self.gen_lines_from_pts(warped.shape, y_right_bounded, fitx_right_bounded)
+        left_line_only_img_unwarped = self.unwarp(left_line_only_img)
+        right_line_only_img_unwarped = self.unwarp(right_line_only_img)
+        yx = np.where(left_line_only_img_unwarped > 0)
+        y_left_unwarped, x_left_unwarped = yx[0], yx[1]
+        yx = np.where(right_line_only_img_unwarped > 0)
+        y_right_unwarped, x_right_unwarped = yx[0], yx[1]
+        fity_left_unwarped, fitx_left_unwarped, fity_right_unwarped, fitx_right_unwarped = \
+            self.poly_fit_unwarped(warped.shape,y_left_unwarped, x_left_unwarped,y_right_unwarped, x_right_unwarped)
+        # Apply poly fill
+        poly_fill_gray = np.zeros_like(warped).astype(np.uint8)
+        poly_fill_color = np.dstack((poly_fill_gray, poly_fill_gray, poly_fill_gray))
+        pts_left = np.array([np.transpose(np.vstack([fitx_left_unwarped, fity_left_unwarped]))])
+        pts_right = np.array([np.flipud(np.transpose(np.vstack([fitx_right_unwarped, fity_right_unwarped])))])
         pts = np.hstack((pts_left, pts_right))
-        cv2.fillPoly(color_warp, np.int_([pts]), (0, 255, 0))
-        newwarp = self.unwarp(color_warp)
-        result = cv2.addWeighted(undist, 1, newwarp, 0.3, 0)
-        return result,color_warp
+        cv2.fillPoly(poly_fill_color, np.int_([pts]), (0, 255, 0))
+        result = cv2.addWeighted(undist, 1, poly_fill_color, 0.3, 0)
+        return result,poly_fill_color
 
     def curvrad(self, y_left, fitx_left, y_right, fitx_right):
         ym_per_pix = 3 / self.dashed_line_length_in_pixel
