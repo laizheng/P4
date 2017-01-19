@@ -30,6 +30,11 @@ class Filter():
         # y values for detected line pixels
         self.ally = None
 
+        self.fit_coeff_left_history = [] # list of numpy arrays
+        self.fit_coeff_right_history = []
+        self.fit_coeff_left_avg = np.array([0,0,0])
+        self.fit_coeff_right_avg = np.array([0, 0, 0])
+
         self.img = None
         self.image_paths = glob.glob(image_paths)
         f = open('dist_pickle.p', 'rb')
@@ -70,12 +75,13 @@ class Filter():
         self.box_step_horizontal = 1
         self.box_step_vertical = 25
 
-        # Cur Rad
-        self.dashed_line_length_in_pixel = 62
-        self.lane_width_in_pixel = 900
+        # Cur Rad, offset, lane width
+        self.dashed_line_length_in_pixel = 75
+        self.lane_width_in_pixel = 650
         self.left_curverads = []
         self.right_curverads = []
         self.offsets_meter = []
+        self.estimated_lane_width = []
 
         # Diag Info
         self.font = cv2.FONT_HERSHEY_COMPLEX
@@ -123,7 +129,7 @@ class Filter():
         self.diag9 = self.to3D(self.diag9)
 
         middlepanel = np.zeros((120, 1280, 3), dtype=np.uint8)
-        cv2.putText(middlepanel, 'Frame#: {}'.format(self.frameNum), \
+        cv2.putText(middlepanel, 'Frame#: {}, LaneWidth: {:.2f}m'.format(self.frameNum, self.estimated_lane_width[-1]), \
                     (30, 30), self.font, 1, (255, 0, 0), 2)
         cv2.putText(middlepanel, 'Estimated lane curvature: {:.2f}m'.format(
             0.5 * (self.left_curverads[-1] + self.right_curverads[-1])), \
@@ -380,7 +386,7 @@ class Filter():
             quit()
         y = np.linspace(0, filtered_by_box_image.shape[0]-1, num=100)
         fitx = fit[0] * y ** 2 + fit[1] * y + fit[2]
-        return y, fitx
+        return y, fitx, fit
     
     def remove_out_of_bound_pts(self,warped_shape,y_left, fitx_left, y_right, fitx_right):
         assert len(y_left)==len(fitx_left)
@@ -457,13 +463,38 @@ class Filter():
                          / np.absolute(2 * right_fit_cr[0])
         return left_curverad, right_curverad
 
-    def estimate_center_offset(self, y_left, fitx_left, y_right, fitx_right, warped_shape):
+    def estimate_center_offset_and_lane_width(self, y_left, fitx_left, y_right, fitx_right, warped_shape):
         xm_per_pix = 3.7 / self.lane_width_in_pixel
         car_center_pix = int(warped_shape[1] / 2)
-        lane_center_pix = abs(fitx_left[-1] - fitx_right[-1])
+        lane_center_pix = 0.5*(fitx_left[-1] + fitx_right[-1])
         offset_pix = car_center_pix - lane_center_pix
-        offset_meter = (offset_pix + 268) * xm_per_pix
-        return offset_meter
+        offset_meter = (offset_pix+73) * xm_per_pix
+        lane_width = abs(fitx_left[-1] - fitx_right[-1])*xm_per_pix
+        return offset_meter, lane_width
+
+    def fit_coeff_moving_avg(self,n,fit_coeff_history):
+        cnt = 0
+        fit_coeff_avg = [0,0,0]
+        for i in range(len(fit_coeff_history)):
+            fit_coeff_avg[0] += fit_coeff_history[-i][0]
+            fit_coeff_avg[1] += fit_coeff_history[-i][1]
+            fit_coeff_avg[2] += fit_coeff_history[-i][2]
+            cnt += 1
+            if cnt >= n:
+                break
+        fit_coeff_avg[0] = fit_coeff_avg[0] / cnt
+        fit_coeff_avg[1] = fit_coeff_avg[1] / cnt
+        fit_coeff_avg[2] = fit_coeff_avg[2] / cnt
+        return np.array(fit_coeff_avg)
+    
+    def gen_pts_from_history(self):
+        y_left = np.linspace(0, self.img.shape[0] - 1, num=100)
+        fitx_left = self.fit_coeff_left_avg[0] * y_left ** 2 + self.fit_coeff_left_avg[1] * y_left + \
+                    self.fit_coeff_left_avg[2]
+        y_right = np.linspace(0, self.img.shape[0] - 1, num=100)
+        fitx_right = self.fit_coeff_right_avg[0] * y_right ** 2 + self.fit_coeff_right_avg[1] * y_right + \
+                    self.fit_coeff_right_avg[2]
+        return y_left, fitx_left, y_right, fitx_right
 
     def pipline(self, img):
         self.img = img
@@ -476,14 +507,20 @@ class Filter():
         box_image_left, box_image_right = self.box_image_gen(warped.shape, coorindates_left, coordinates_right)
         filtered_by_box_image_left = np.multiply(warped, box_image_left)
         filtered_by_box_image_right = np.multiply(warped, box_image_right)
-        y_left, fitx_left = self.poly_fit(filtered_by_box_image_left)
-        y_right, fitx_right = self.poly_fit(filtered_by_box_image_right)
+        y_left, fitx_left, fit_coeff_left = self.poly_fit(filtered_by_box_image_left)
+        y_right, fitx_right, fit_coeff_right = self.poly_fit(filtered_by_box_image_right)
+        self.fit_coeff_left_history.append(fit_coeff_left)
+        self.fit_coeff_right_history.append(fit_coeff_right)
+        self.fit_coeff_left_avg = self.fit_coeff_moving_avg(10,self.fit_coeff_left_history)
+        self.fit_coeff_right_avg = self.fit_coeff_moving_avg(10, self.fit_coeff_right_history)
+        y_left, fitx_left, y_right, fitx_right = self.gen_pts_from_history()
         projection, warped_polyfill = self.project(warped, y_left, fitx_left, y_right, fitx_right, undist)
         left_curvrad, right_curvrad = self.curvrad(y_left, fitx_left, y_right, fitx_right)
-        offset_meter = self.estimate_center_offset(y_left, fitx_left, y_right, fitx_right, warped.shape)
+        offset_meter, estimated_lane_width = self.estimate_center_offset_and_lane_width(y_left, fitx_left, y_right, fitx_right, warped.shape)
         self.offsets_meter.append(offset_meter)
         self.left_curverads.append(left_curvrad)
         self.right_curverads.append(right_curvrad)
+        self.estimated_lane_width.append(estimated_lane_width)
         self.resetDiag()
         self.mainDiagScreen = projection
         self.diag1 = self.warp(undist)
