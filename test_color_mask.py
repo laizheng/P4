@@ -11,7 +11,7 @@ from moviepy.editor import VideoFileClip
 def main():
     #filter = Filter(image_paths = "./project_video_images/*.jpg")
     filter = Filter(image_paths="./project_video_images_debug/*.jpg")
-    filter.image_paths = ["./project_video_images_debug/17.jpg"]
+    filter.image_paths = ["./project_video_images_debug/23.jpg","./project_video_images_debug/21.jpg"]
     for path in filter.image_paths:
         print("processing...{}".format(path))
         img = filter.imread(path)

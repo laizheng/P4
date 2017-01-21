@@ -416,7 +416,12 @@ class Filter():
         fitx_left = fit_left[0] * fity_left ** 2 + fit_left[1] * fity_left + fit_left[2]
         fity_right = np.linspace(np.min(y_right),img_shape[0]-25, num=100)
         fitx_right = fit_right[0] * fity_right ** 2 + fit_right[1] * fity_right + fit_right[2]
-        return fity_left,fitx_left,fity_right,fitx_right
+        y_left_concat, x_left_concat, y_right_concat, x_right_concat= [], [], [], []
+        y_left_concat = y_left + list(fity_left[fity_left>np.max(y_left)])
+        x_left_concat = x_left + list(fitx_left[fity_left>np.max(y_left)])
+        y_right_concat = y_right + list(fity_right[fity_right > np.max(y_right)])
+        x_right_concat = x_right + list(fitx_right[fity_right > np.max(y_right)])
+        return y_left_concat,x_left_concat,y_right_concat,x_right_concat
 
     def gen_lines_from_pts(self,img_shape,y, x):
         ret_img = np.zeros(img_shape)
@@ -425,22 +430,42 @@ class Filter():
         for i in pts:
             ret_img[i] = 255
         return ret_img
-    
+
+    def polyfill_warped(self, warped, y_left, fitx_left, y_right, fitx_right):
+        warped_gray =  (warped/np.max(warped) * 255).astype(np.uint8)
+        warped_color = np.dstack((warped_gray,warped_gray,warped_gray))
+        poly_fill_gray = np.zeros_like(warped).astype(np.uint8)
+        poly_fill_color = np.dstack((poly_fill_gray, poly_fill_gray, poly_fill_gray))
+        pts_left = np.array([np.transpose(np.vstack([fitx_left, y_left]))])
+        pts_right = np.array([np.flipud(np.transpose(np.vstack([fitx_right, y_right])))])
+        pts = np.hstack((pts_left, pts_right))
+        cv2.fillPoly(poly_fill_color, np.int_([pts]), (0, 255, 0))
+        result = cv2.addWeighted(warped_color, 1, poly_fill_color, 0.3, 0)
+        return result
+
     def project(self, warped, y_left, fitx_left, y_right, fitx_right, undist):
         # Remove out of bound points
         y_left_bounded, fitx_left_bounded, y_right_bounded, fitx_right_bounded = \
             self.remove_out_of_bound_pts(warped.shape,y_left, fitx_left, y_right, fitx_right)
-        # Extend the lines to bottom of images
-        left_line_only_img = self.gen_lines_from_pts(warped.shape, y_left_bounded, fitx_left_bounded)
-        right_line_only_img = self.gen_lines_from_pts(warped.shape, y_right_bounded, fitx_right_bounded)
-        left_line_only_img_unwarped = self.unwarp(left_line_only_img)
-        right_line_only_img_unwarped = self.unwarp(right_line_only_img)
-        yx = np.where(left_line_only_img_unwarped > 0)
-        y_left_unwarped, x_left_unwarped = yx[0], yx[1]
-        yx = np.where(right_line_only_img_unwarped > 0)
-        y_right_unwarped, x_right_unwarped = yx[0], yx[1]
+        poly_fill_gray = np.zeros_like(warped).astype(np.uint8)
+        poly_fill_color = np.dstack((poly_fill_gray, poly_fill_gray, poly_fill_gray))
+        pts_left = np.array([np.transpose(np.vstack([fitx_left_bounded, y_left_bounded]))])
+        pts_right = np.array([np.flipud(np.transpose(np.vstack([fitx_right_bounded, y_right_bounded])))])
+        pts = np.hstack((pts_left, pts_right))
+        cv2.fillPoly(poly_fill_color, np.int_([pts]), (0, 255, 0))
+        poly_fill_color_unwarped = self.unwarp(poly_fill_color)
+        poly_fill_gray_unwarped = cv2.cvtColor(poly_fill_color_unwarped,cv2.COLOR_RGB2GRAY)
+        nzyx = np.where(poly_fill_gray_unwarped>0)
+        unique_ys = np.unique(nzyx[0])
+        y_left_unwarped, x_left_unwarped, y_right_unwarped, x_right_unwarped = [], [], [], []
+        for y in unique_ys:
+            y_left_unwarped.append(y)
+            y_right_unwarped.append(y)
+            xs = nzyx[1][nzyx[0] == y]
+            x_left_unwarped.append(np.min(xs))
+            x_right_unwarped.append(np.max(xs))
         fity_left_unwarped, fitx_left_unwarped, fity_right_unwarped, fitx_right_unwarped = \
-            self.poly_fit_unwarped(warped.shape,y_left_unwarped, x_left_unwarped,y_right_unwarped, x_right_unwarped)
+            self.poly_fit_unwarped(warped.shape, y_left_unwarped, x_left_unwarped, y_right_unwarped, x_right_unwarped)
         # Apply poly fill
         poly_fill_gray = np.zeros_like(warped).astype(np.uint8)
         poly_fill_color = np.dstack((poly_fill_gray, poly_fill_gray, poly_fill_gray))
@@ -449,7 +474,7 @@ class Filter():
         pts = np.hstack((pts_left, pts_right))
         cv2.fillPoly(poly_fill_color, np.int_([pts]), (0, 255, 0))
         result = cv2.addWeighted(undist, 1, poly_fill_color, 0.3, 0)
-        return result,poly_fill_color
+        return result, poly_fill_color
 
     def curvrad(self, y_left, fitx_left, y_right, fitx_right):
         ym_per_pix = 3 / self.dashed_line_length_in_pixel
@@ -509,12 +534,13 @@ class Filter():
         filtered_by_box_image_right = np.multiply(warped, box_image_right)
         y_left, fitx_left, fit_coeff_left = self.poly_fit(filtered_by_box_image_left)
         y_right, fitx_right, fit_coeff_right = self.poly_fit(filtered_by_box_image_right)
-        self.fit_coeff_left_history.append(fit_coeff_left)
-        self.fit_coeff_right_history.append(fit_coeff_right)
-        self.fit_coeff_left_avg = self.fit_coeff_moving_avg(10,self.fit_coeff_left_history)
-        self.fit_coeff_right_avg = self.fit_coeff_moving_avg(10, self.fit_coeff_right_history)
-        y_left, fitx_left, y_right, fitx_right = self.gen_pts_from_history()
-        projection, warped_polyfill = self.project(warped, y_left, fitx_left, y_right, fitx_right, undist)
+        warped_polyfilled = self.polyfill_warped(warped, y_left, fitx_left, y_right, fitx_right)
+        #self.fit_coeff_left_history.append(fit_coeff_left)
+        #self.fit_coeff_right_history.append(fit_coeff_right)
+        #self.fit_coeff_left_avg = self.fit_coeff_moving_avg(10,self.fit_coeff_left_history)
+        #self.fit_coeff_right_avg = self.fit_coeff_moving_avg(10, self.fit_coeff_right_history)
+        #y_left, fitx_left, y_right, fitx_right = self.gen_pts_from_history()
+        projection, unwarped_polyfilled = self.project(warped, y_left, fitx_left, y_right, fitx_right, undist)
         left_curvrad, right_curvrad = self.curvrad(y_left, fitx_left, y_right, fitx_right)
         offset_meter, estimated_lane_width = self.estimate_center_offset_and_lane_width(y_left, fitx_left, y_right, fitx_right, warped.shape)
         self.offsets_meter.append(offset_meter)
@@ -528,9 +554,8 @@ class Filter():
         self.diag3 = color_binary
         self.diag4 = combined_thresholing
         self.diag5 = sliding_result
-        self.diag6 = filtered_by_box_image_left
-        self.diag7 = filtered_by_box_image_right
-        self.diag8 = warped_polyfill
+        self.diag6 = warped_polyfilled
+        self.diag7 = unwarped_polyfilled
         self.frameNum = self.frameNum + 1
         self.diagScreenUpdate()
         return self.diagScreen
