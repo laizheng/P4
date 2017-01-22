@@ -30,11 +30,18 @@ class Filter():
         # y values for detected line pixels
         self.ally = None
 
+        # Number to linspace points used for polyfit
+        self.num_points_polyfit = 100
+
         self.fit_coeff_left_history = [] # list of numpy arrays
         self.fit_coeff_right_history = []
         self.fit_coeff_left_avg = np.array([0,0,0])
         self.fit_coeff_right_avg = np.array([0, 0, 0])
 
+        self.fitx_left_history = np.array([]) # arrays of arrays
+        self.fitx_right_history = np.array([])
+
+        # Undistortion Param
         self.img = None
         self.image_paths = glob.glob(image_paths)
         f = open('dist_pickle.p', 'rb')
@@ -42,23 +49,11 @@ class Filter():
         self.mtx = dist_pickle["mtx"]
         self.dist = dist_pickle["dist"]
 
-        # slb = (265,737)
-        # slt = (605,460)
-        # srb = (1172,737)
-        # srt = (683,460)
-
-        #slb = (0, 680)
-        #slt = (565, 460)
-
-        #srb = (1279, 680)
-        #srt = (715, 460)
-
+        # Warp Param
         slb = (0, 650)
         slt = (555, 460)
-
         srb = (1279, 650)
         srt = (720, 460)
-
         self.src = np.float32([slb, slt, srb, srt])
 
         dlb = (slb[0],737)
@@ -384,7 +379,7 @@ class Filter():
         except TypeError:
             cv2.imwrite("debug_orig_img_poly_fit_filter_box.jpg", cv2.cvtColor(self.img, cv2.COLOR_RGB2BGR))
             quit()
-        y = np.linspace(0, filtered_by_box_image.shape[0]-1, num=100)
+        y = np.linspace(0, filtered_by_box_image.shape[0]-1, num=self.num_points_polyfit)
         fitx = fit[0] * y ** 2 + fit[1] * y + fit[2]
         return y, fitx, fit
     
@@ -521,6 +516,25 @@ class Filter():
                     self.fit_coeff_right_avg[2]
         return y_left, fitx_left, y_right, fitx_right
 
+    def get_fitx_from_history(self,fitx_left,fitx_right):
+        assert fitx_left.shape[0] == fitx_right.shape[0]
+
+        if (self.fitx_left_history.shape[0]==0):
+            self.fitx_left_history = np.array(fitx_left)
+            fitx_left_avg = self.fitx_left_history
+        else:
+            self.fitx_left_history = np.vstack((self.fitx_left_history, np.array(fitx_left)))
+            fitx_left_avg = np.average(self.fitx_left_history[-10:], axis=0)
+
+        if (self.fitx_right_history.shape[0]==0):
+            self.fitx_right_history = np.array(fitx_right)
+            fitx_right_avg = self.fitx_right_history
+        else:
+            self.fitx_right_history = np.vstack((self.fitx_right_history, np.array(fitx_right)))
+            fitx_right_avg = np.average(self.fitx_right_history[-10:], axis=0)
+
+        return fitx_left_avg, fitx_right_avg
+
     def pipline(self, img):
         self.img = img
         undist = self.undistort(img)
@@ -534,6 +548,7 @@ class Filter():
         filtered_by_box_image_right = np.multiply(warped, box_image_right)
         y_left, fitx_left, fit_coeff_left = self.poly_fit(filtered_by_box_image_left)
         y_right, fitx_right, fit_coeff_right = self.poly_fit(filtered_by_box_image_right)
+        fitx_left, fitx_right = self.get_fitx_from_history(fitx_left,fitx_right)
         warped_polyfilled = self.polyfill_warped(warped, y_left, fitx_left, y_right, fitx_right)
         #self.fit_coeff_left_history.append(fit_coeff_left)
         #self.fit_coeff_right_history.append(fit_coeff_right)

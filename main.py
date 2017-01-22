@@ -10,7 +10,9 @@ from moviepy.editor import VideoFileClip
 
 def main():
     filter = Filter(image_paths="./project_video_images/*.jpg")
-    filter.toVideo(input_video_file_name="project_video.mp4",output_video_file_name="project_video_out.mp4")
+    #filter.toVideo(input_video_file_name="project_video.mp4",output_video_file_name="project_video_out.mp4")
+    filter.toVideo(input_video_file_name="challenge_video.mp4", output_video_file_name="challenge_video_out.mp4")
+    #filter.toVideo(input_video_file_name="project_video_cut.mov", output_video_file_name="project_video_cut_out.mp4")
 
 if __name__ == "__main__":
     main()
